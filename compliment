@@ -11,13 +11,25 @@ _BOLD="\033[1m"
 _UNDERLINE="\033[4m"
 DEBUG=1
 
+declare _SHELL_TYPE
+declare _SHELL_CONF_DIR
+declare _SHELL_COMPLETION_DIR
+declare _SHELL_RC_FILE
+
 get_shell_type() {
-    grep -Po "^$USER:.*:[^:]*/\K[^/]*$" /etc/passwd
+    if [ -n "$_SHELL_TYPE" ]; then
+        echo "$_SHELL_TYPE"
+        return 0
+    fi
+    _SHELL_TYPE="$(grep -Po "^$USER:.*:[^:]*/\K[^/]*$" /etc/passwd)"
+    echo "$_SHELL_TYPE"
 }
 
 zsh_conf_dir() {
     # local lnk="$(find "$HOME" -maxdepth 1 -type l -printf "%f\n" | grep "\.zsh")"
-    local ZDOTDIR="${ZDOTDIR:-~/.zsh}"
+    local ZDOTDIR
+    ZDOTDIR="$(zsh -c 'echo $ZDOTDIR')"
+    ZDOTDIR="${ZDOTDIR:-~/.zsh}"
     if [ -d "$ZDOTDIR" ]; then
         echo "$ZDOTDIR"
         return 0
@@ -46,6 +58,81 @@ bash_conf_dir() {
     fi
     return 1
 }
+
+get_config_dir() {
+    local shell_type="$1"
+    if [ -n "$_SHELL_CONF_DIR" ]; then
+        echo "$_SHELL_CONF_DIR"
+        return 0
+    fi
+    if [ "$shell_type" == "zsh" ]; then
+        _SHELL_CONF_DIR="$(zsh_conf_dir)"
+    else
+        _SHELL_CONF_DIR="$(bash_conf_dir)"
+    fi
+    echo "$_SHELL_CONF_DIR"
+}
+
+get_rc_file() {
+    local shell_type="$1"
+    local ZDOTDIR
+    ZDOTDIR="$(zsh -c 'echo $ZDOTDIR')"
+    if [ -n "$_SHELL_RC_FILE" ]; then
+        echo "$_SHELL_RC_FILE"
+        return 0
+    fi
+
+    if [ "$shell_type" == "zsh" ]; then
+        if [ -d "$ZDOTDIR" ] && [ -f "$ZDOTDIR/.zshrc" ]; then
+            _SHELL_RC_FILE="$(readlink -f "$ZDOTDIR/.zshrc")"
+            echo "$_SHELL_RC_FILE"
+            return 0
+        fi
+        if [ -f ~/.zshrc ]; then
+            _SHELL_RC_FILE="$(readlink -f ~/.zshrc)"
+            echo "$_SHELL_RC_FILE"
+            return 0
+        fi
+        log "ERROR" "Zsh config file not found"
+        return 1
+    else
+        if [ -f ~/.bashrc ]; then
+            _SHELL_RC_FILE="$(readlink -f ~/.bashrc)"
+            echo "$_SHELL_RC_FILE"
+            return 0
+        fi
+        log "ERROR" "Bash config file not found"
+        return 1
+    fi
+}
+
+# Function to get the completion directory based on shell type
+get_completion_dir() {
+    local shell_type="$1"
+    _SHELL_COMPLETION_DIR=${_SHELL_COMPLETION_DIR:-}
+
+    if [ -n "$_SHELL_COMPLETION_DIR" ]; then
+        echo "$_SHELL_COMPLETION_DIR"
+        return 0
+    fi
+    if [ "$shell_type" == "zsh" ] && [ -n "$ZSH_COMPLETION_DIR" ]; then
+        _SHELL_COMPLETION_DIR="$ZSH_COMPLETION_DIR"
+        echo "$_SHELL_COMPLETION_DIR"
+        return 0
+    fi
+
+    if [ "$shell_type" == "bash" ] && [ -n "$BASH_COMPLETION_DIR" ]; then
+        _SHELL_COMPLETION_DIR="$BASH_COMPLETION_DIR"
+        echo "$_SHELL_COMPLETION_DIR"
+        return 0
+    fi
+    local COMPLETION_DIRNAME=${COMPLETION_DIRNAME:-_completion.d}
+    local conf_dir
+    conf_dir="$(get_config_dir "$shell_type")"
+    _SHELL_COMPLETION_DIR="$conf_dir/${shell_type}${COMPLETION_DIRNAME}"
+    echo "$_SHELL_COMPLETION_DIR"
+}
+
 # Function to check if the script is sourced
 sourced_p() {
     ! [[ "${BASH_SOURCE[0]}" == "${0}" ]]
@@ -117,6 +204,7 @@ ensure_completion_loaded() {
         echo "$autoload_cmd" >>"$filename"
     fi
 }
+
 reload_completions() {
     local type="${1:-$COMPL_SHELL}"
     if [ "$type" == "zsh" ]; then
@@ -130,6 +218,7 @@ reload_completions() {
         log "INFO" "Bash completions reloaded"
     fi
 }
+
 add_completion_from_file() {
     local filepath="$1"
     local type="${2:-$COMPL_SHELL}"
@@ -146,6 +235,7 @@ add_completion_from_file() {
         return 1
     fi
 }
+
 # add_completion_from_command() {
 #     local cmd="$1"
 #     local name="$2"
@@ -197,49 +287,6 @@ add_completion_from_command() {
             return 1
         fi
     fi
-}
-
-get_config_dir() {
-    local shell_type="$1"
-    if [ "$shell_type" == "zsh" ]; then
-        zsh_conf_dir
-    else
-        bash_conf_dir
-    fi
-}
-
-get_rc_file() {
-    local shell_type="$1"
-    local ZDOTDIR
-    ZDOTDIR="$(zsh -c 'echo $ZDOTDIR')"
-    if [ "$shell_type" == "zsh" ]; then
-        if [ -d "$ZDOTDIR" ] && [ -f "$ZDOTDIR/.zshrc" ]; then
-            readlink -f "$ZDOTDIR/.zshrc"
-            return 0
-        fi
-        if [ -f ~/.zshrc ]; then
-            readlink -f  ~/.zshrc
-            return 0
-        fi
-        log "ERROR" "Zsh config file not found"
-        return 1
-    else
-        if [ -f ~/.bashrc ]; then
-            readlink -f  ~/.bashrc
-            return 0
-            fi
-        log "ERROR" "Bash config file not found"
-        return 1
-    fi
-}
-
-# Function to get the completion directory based on shell type
-get_completion_dir() {
-    local shell_type="$1"
-    local COMPLETION_DIRNAME=${COMPLETION_DIRNAME:-_completion.d}
-    local conf_dir
-    conf_dir="$(get_config_dir "$shell_type")"
-    echo "$conf_dir/${shell_type}${COMPLETION_DIRNAME}"
 }
 
 # Function to add completion from stdin
@@ -325,6 +372,7 @@ main() {
                 shift # Consume the argument
                 if [ -n "$1" ]; then
                     shell_type="$1"
+                    _SHELL_TYPE="$1"
                 else
                     echo "Error: Argument for --chsh is missing"
                     exit 1
@@ -344,7 +392,7 @@ main() {
 
 # Only execute main when not sourced
 if ! sourced_p; then
-      if [ "$#" -gt 0 ]; then
+    if [ "$#" -gt 0 ]; then
         main "$@"
     else
         usage
