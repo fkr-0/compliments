@@ -1,0 +1,353 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Global color variables
+_GREEN="\033[0;32m"
+_RED="\033[0;31m"
+_YELLOW="\033[0;33m"
+_BLUE="\033[0;34m"
+_RESET="\033[0m"
+_BOLD="\033[1m"
+_UNDERLINE="\033[4m"
+DEBUG=1
+
+get_shell_type() {
+    grep -Po "^$USER:.*:[^:]*/\K[^/]*$" /etc/passwd
+}
+
+zsh_conf_dir() {
+    # local lnk="$(find "$HOME" -maxdepth 1 -type l -printf "%f\n" | grep "\.zsh")"
+    local ZDOTDIR="${ZDOTDIR:-~/.zsh}"
+    if [ -d "$ZDOTDIR" ]; then
+        echo "$ZDOTDIR"
+        return 0
+    fi
+    if [ -f ~/.zshrc ]; then
+        readlink -f ~/.zshrc | xargs dirname
+        return 0
+    fi
+
+    if [ -f ~/.zshenv ]; then
+        readlink -f ~/.zshenv | xargs dirname
+        return 0
+    fi
+    return 1
+}
+
+bash_conf_dir() {
+    if [ -f ~/.bashrc ]; then
+        readlink -f ~/.bashrc | xargs dirname
+        return 0
+    fi
+
+    if [ -f ~/.bash_profile ]; then
+        readlink -f ~/.bash_profile | xargs dirname
+        return 0
+    fi
+    return 1
+}
+# Function to check if the script is sourced
+sourced_p() {
+    ! [[ "${BASH_SOURCE[0]}" == "${0}" ]]
+}
+
+usage() {
+    echo -e "${_BOLD}${_UNDERLINE}compliment - a tool for managing shell completions${_RESET}"
+    echo -e "Usage: ${_BLUE}compliment ${_YELLOW}[options]${_RESET}"
+    echo -e "Options:"
+    echo -e "  ${_YELLOW}--file${_RESET}    <file>        Add a completion file"
+    echo -e "  ${_YELLOW}--command${_RESET} <cmd> <name>  Add a completion script"
+    echo -e "                           from a commands output"
+    echo -e "  ${_YELLOW}--stdin${_RESET}   <name>        Add a completion script through"
+    echo -e "                           stdin from a commands output"
+    echo -e "  ${_YELLOW}--remove${_RESET}  <name>        Remove a completion script"
+    echo -e "  ${_YELLOW}--list${_RESET}                  List completion scripts"
+    echo -e "  ${_YELLOW}--reload${_RESET}                List completion scripts"
+    echo -e "  ${_YELLOW}--chsh${_RESET}    <shell>       Set the shell type to <shell>"
+    echo -e "                           (zsh or bash, default: login shell)"
+    echo ""
+}
+
+# Logging function with enhanced error logging
+log() {
+    local level="$1"
+    shift
+    case "$level" in
+        INFO) echo -e "${_BLUE}INFO:${_RESET}" "$@" >&2 ;;
+        ERROR) echo -e "${_RED}ERROR:${_RESET}" "$@" >&2 ;;
+        DEBUG) [[ "$DEBUG" -eq 1 ]] && echo -e "${_YELLOW}DEBUG:${_RESET}" "$@" >&2 ;;
+    esac
+}
+
+ensure_completion_loaded() {
+    local type="${1:-zsh}"
+    local filename="$2"
+    local completion_dir
+    completion_dir="$(get_completion_dir "$type")"
+    local autoload_cmd
+
+    if [ "$type" == "zsh" ]; then
+        autoload_cmd="fpath=($completion_dir \$fpath)"
+        if grep -qF "$autoload_cmd" "$filename"; then
+            log "DEBUG" "${type}>autoload command already present in $filename"
+            return 0
+        fi
+        # Check if 'compinit' is already in the file
+        if grep -q "compinit" "$filename"; then
+            log "DEBUG" "${type}>inserting autoload command in $filename"
+            # Add the autoload command just before 'compinit'
+            sed -i "/compinit/i $autoload_cmd" "$filename"
+
+            # log "DEBUG" "FileContent: $(cat "$filename")"  >> /tmp/dud 2>&1
+        else
+            # Prepend the autoload command to the start of the file
+            log "DEBUG" "${type}>prepending autoload command to $filename"
+            log "DEBUG" "${type}>autoload command: $autoload_cmd"
+            echo -e "$autoload_cmd\n$(cat "$filename")" >"$filename"
+        fi
+        # echo "autoload -Uz compinit && compinit" >>"$filename"
+    else
+        autoload_cmd="for file in $completion_dir/*; do . \"\$file\"; done"
+        if grep -qF "$autoload_cmd" "$filename"; then
+            log "DEBUG" "${type}>autoload command already present in $filename"
+            return 0
+        fi
+        log "DEBUG" "${type}>adding autoload command to $filename"
+        log "DEBUG" "${type}>autoload command: $autoload_cmd"
+        echo "$autoload_cmd" >>"$filename"
+    fi
+}
+reload_completions() {
+    local type="${1:-$COMPL_SHELL}"
+    if [ "$type" == "zsh" ]; then
+        autoload -Uz compinit && compinit
+        log "INFO" "Zsh completions exiting && reloading"
+        exec zsh
+    else
+        for file in $(get_completion_dir "bash")/*; do
+            . "$file"
+        done
+        log "INFO" "Bash completions reloaded"
+    fi
+}
+add_completion_from_file() {
+    local filepath="$1"
+    local type="${2:-$COMPL_SHELL}"
+    local completion_dir
+
+    completion_dir="$(get_completion_dir "$type")"
+    log "DEBUG" "Adding file to completion directory: $completion_dir"
+
+    if [ -f "$filepath" ]; then
+        cp "$filepath" "$completion_dir"/"$(basename "$filepath")"
+        log "INFO" "Added '$(basename "$filepath")' to $completion_dir"
+    else
+        log "ERROR" "Invalid file path provided: $filepath"
+        return 1
+    fi
+}
+# add_completion_from_command() {
+#     local cmd="$1"
+#     local name="$2"
+#     local type="${3:-$COMPL_SHELL}"
+#     local completion_dir
+
+#     completion_dir="$(get_completion_dir "$type")"
+#     log "DEBUG" "Adding command output to completion directory: $completion_dir"
+
+#     if [ "$cmd" == "-" ]; then
+#         cat >"$completion_dir/$name"
+#     else
+#         # Validate the command before execution
+#         if [ -z "$cmd" ] || [ ! -x "$cmd" ]; then
+#             log "ERROR" "Invalid or non-executable command: $cmd"
+#             return 1
+#         fi
+
+#         # Execute the command and capture output
+#         if output=$($cmd 2>&1); then
+#             echo "$output" >"$completion_dir/$name"
+#             log "INFO" "Added completion script '$name' from command to $completion_dir"
+#         else
+#             log "ERROR" "Failed to execute command: $cmd"
+#             return 1
+#         fi
+#     fi
+# }
+
+add_completion_from_command() {
+    local cmd="$1"
+    local name="$2"
+    local type="${3:-$COMPL_SHELL}"
+    local completion_dir
+
+    completion_dir="$(get_completion_dir "$type")"
+    log "DEBUG" "Adding command output to completion directory: $completion_dir"
+
+    if [ "$cmd" == "-" ]; then
+        cat >"$completion_dir/$name"
+    else
+        # Safer command execution with error checking does not work unfortunately(?)
+        # if bash -c $(printf "%q" "$cmd") >"$completion_dir/$name"; then
+        if bash -c "$cmd" >"$completion_dir/$name"; then
+            log "INFO" "Added completion script '$name' from command to $completion_dir"
+        else
+            log "ERROR" "Failed to execute command: $cmd"
+            log "ERROR" "$(ls -l "$(dirname "$cmd")")"
+            return 1
+        fi
+    fi
+}
+
+get_config_dir() {
+    local shell_type="$1"
+    if [ "$shell_type" == "zsh" ]; then
+        zsh_conf_dir
+    else
+        bash_conf_dir
+    fi
+}
+
+get_rc_file() {
+    local shell_type="$1"
+    local ZDOTDIR
+    ZDOTDIR="$(zsh -c 'echo $ZDOTDIR')"
+    if [ "$shell_type" == "zsh" ]; then
+        if [ -d "$ZDOTDIR" ] && [ -f "$ZDOTDIR/.zshrc" ]; then
+            readlink -f "$ZDOTDIR/.zshrc"
+            return 0
+        fi
+        if [ -f ~/.zshrc ]; then
+            readlink -f  ~/.zshrc
+            return 0
+        fi
+        log "ERROR" "Zsh config file not found"
+        return 1
+    else
+        if [ -f ~/.bashrc ]; then
+            readlink -f  ~/.bashrc
+            return 0
+            fi
+        log "ERROR" "Bash config file not found"
+        return 1
+    fi
+}
+
+# Function to get the completion directory based on shell type
+get_completion_dir() {
+    local shell_type="$1"
+    local COMPLETION_DIRNAME=${COMPLETION_DIRNAME:-_completion.d}
+    local conf_dir
+    conf_dir="$(get_config_dir "$shell_type")"
+    echo "$conf_dir/${shell_type}${COMPLETION_DIRNAME}"
+}
+
+# Function to add completion from stdin
+add_completion_from_stdin() {
+    local name="$1"
+    local type="${2:-$COMPL_SHELL}"
+    local completion_dir
+
+    completion_dir="$(get_completion_dir "$type")"
+    log "DEBUG" "Adding completion script to $completion_dir from stdin"
+
+    # Read from stdin and write to the completion script file
+    cat >"$completion_dir/$name"
+    log "INFO" "Added completion script '$name' from stdin to $completion_dir"
+}
+# Main function
+main() {
+    local COMPL_SHELL
+    COMPL_SHELL="$(get_shell_type)"
+    local CONF_DIR
+    CONF_DIR="$(get_config_dir "$COMPL_SHELL")"
+    local COMPLETION_DIR
+    COMPLETION_DIR="$(get_completion_dir "$COMPL_SHELL")"
+    local RC_FILE
+    RC_FILE="$(get_rc_file "$COMPL_SHELL")"
+
+    log "INFO" "Shell Type: ${COMPL_SHELL}"
+    log "INFO" "RC File: ${RC_FILE}"
+    log "INFO" "Config Directory: ${CONF_DIR}"
+    log "INFO" "Completion Directory: ${COMPLETION_DIR}"
+    log "INFO" "Completion Directory exists: \
+      $(if [ -d "$COMPLETION_DIR" ]; then echo "yes"; else echo "no"; fi)"
+
+    local shell_type
+    shell_type="$(get_shell_type)"
+
+    while (("$#")); do
+        case "$1" in
+            --file)
+                shift # Consume the argument
+                if [ -n "$1" ] && [ -f "$1" ]; then
+                    add_completion_from_file "$1" "$shell_type"
+                else
+                    echo "Error: Argument for --file is missing or not a file"
+                    exit 1
+                fi
+                ;;
+            --command)
+                shift # Consume the argument
+                if [ -n "$1" ] && [ -n "$2" ]; then
+                    add_completion_from_command "$1" "$2" "$shell_type"
+                    shift # Consume the next argument
+                else
+                    echo "Error: Arguments for --command are missing or invalid"
+                    exit 1
+                fi
+                ;;
+            --stdin)
+                shift # Consume the argument
+                if [ -n "$1" ]; then
+                    add_completion_from_stdin "$1" "$shell_type"
+                else
+                    log "ERROR" "Argument for --stdin is missing"
+                    return 1
+                fi
+                ;;
+            --reload)
+                reload_completions "$shell_type"
+                ;;
+            --remove)
+                shift # Consume the argument
+                if [ -n "$1" ]; then
+                    remove_completion "$1" "$shell_type"
+                else
+                    echo "Error: Argument for --remove is missing"
+                    exit 1
+                fi
+                ;;
+            --list)
+                list_completions "$shell_type"
+                ;;
+            --chsh)
+                shift # Consume the argument
+                if [ -n "$1" ]; then
+                    shell_type="$1"
+                else
+                    echo "Error: Argument for --chsh is missing"
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "Error: Invalid option $1"
+                echo ""
+                usage
+                exit 1
+                ;;
+        esac
+        shift # Always shift at the end of the loop
+    done
+    ensure_completion_loaded "$COMPL_SHELL" "$RC_FILE"
+}
+
+# Only execute main when not sourced
+if ! sourced_p; then
+      if [ "$#" -gt 0 ]; then
+        main "$@"
+    else
+        usage
+        exit 1
+    fi
+fi
