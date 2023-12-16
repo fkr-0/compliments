@@ -1,0 +1,35 @@
+#+title: Compliment - Completion alimentaries
+
+A script that should facilitate simple listing/addition/removal of completion scripts for your favorite [ba][z]shells.
+
+Not *so* simple though..
+
+* Features
+*set -euo pipefail* !! ! ..sigh
+
+By default the completions are assumed to be provided for the shell defined as the logged in ~$USER~ s /login-shell/ (~grep -Po ^$USER:.. /etc/passwd~). This should be override-able by passing ~--chsh {zsh,bash}~.
+** Add Completions
+.. by providing
+- a file
+  #+begin_src shell
+compliment --file /path/to/completion_file
+  #+end_src
+- a command
+  #+begin_src shell
+compliment --command "python myscript --make-comp" "myscript-comps"
+  #+end_src
+- data over ~stdin~
+  #+begin_src shell
+python myscript --make-comp compliment --stdin "myscript-comps"
+  #+end_src
+** List Completions
+** Reload Config
+** Ensure loading on startup (idempotent)
+
+* Tests
+#+begin_src sh
+bats ./compliment_tests.bats
+#+end_src
+#+begin_example
+
+#+end_example
