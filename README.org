@@ -1,35 +1,138 @@
-#+title: Compliment - Completion alimentaries
+#+title: Compliment - Shell Completion Manager
 
-A script that should facilitate simple listing/addition/removal of completion scripts for your favorite [ba][z]shells.
+A script that facilitates listing/addition/removal of completion scripts for bash and zsh shells.
 
-Not *so* simple though..
+* Installation
 
-* Features
-*set -euo pipefail* !! ! ..sigh
+Clone the repository and make the script executable:
+#+begin_src shell
+git clone <repository-url>
+cd compliments
+chmod +x compliment
+#+end_src
 
-By default the completions are assumed to be provided for the shell defined as the logged in ~$USER~ s /login-shell/ (~grep -Po ^$USER:.. /etc/passwd~). This should be override-able by passing ~--chsh {zsh,bash}~.
-** Add Completions
-.. by providing
-- a file
-  #+begin_src shell
+Optionally, copy it to a directory in your PATH:
+#+begin_src shell
+sudo cp compliment /usr/local/bin/
+#+end_src
+
+* Usage
+
+Compliment automatically detects your shell from your login shell but can be overridden with ~--chsh~.
+
+** Adding Completions
+
+*** From a file
+#+begin_src shell
 compliment --file /path/to/completion_file
-  #+end_src
-- a command
-  #+begin_src shell
-compliment --command "python myscript --make-comp" "myscript-comps"
-  #+end_src
-- data over ~stdin~
-  #+begin_src shell
-python myscript --make-comp compliment --stdin "myscript-comps"
-  #+end_src
-** List Completions
-** Reload Config
-** Ensure loading on startup (idempotent)
+# For a specific shell
+compliment --file /path/to/completion_file --chsh zsh
+#+end_src
 
-* Tests
-#+begin_src sh
+*** From a command output
+#+begin_src shell
+compliment --command "python myscript --make-comp" "myscript-comps"
+#+end_src
+
+*** From stdin
+#+begin_src shell
+python myscript --make-comp | compliment --stdin "myscript-comps"
+#+end_src
+
+** Managing Completions
+
+*** List completions
+#+begin_src shell
+compliment --list
+# For a specific shell
+compliment --list --chsh bash
+#+end_src
+
+*** Remove a completion
+#+begin_src shell
+compliment --remove completion_name
+#+end_src
+
+*** Reload completions
+#+begin_src shell
+compliment --reload
+#+end_src
+
+** Shell Selection
+
+Override the auto-detected shell:
+#+begin_src shell
+compliment --chsh zsh --file completion.zsh
+compliment --chsh bash --file completion.bash
+#+end_src
+
+* Best Practices
+
+** Security
+- Be cautious when using ~--command~ as it executes arbitrary shell commands
+- Review completion scripts before adding them
+- Prefer ~--file~ or ~--stdin~ over ~--command~ when possible
+
+** Organization
+- Use descriptive names for completion scripts
+- Group related completions with consistent naming
+- Test completions before adding them permanently
+
+** Configuration Files
+Compliment automatically modifies your shell configuration files:
+- Zsh: ~.zshrc~ (respects ~ZDOTDIR~)
+- Bash: ~.bashrc~ or ~.bash_profile~
+- Creates completion directories if they don't exist
+
+** Completion Directories
+- Zsh: ~$HOME/.zsh_completion.d~ or ~$CONFIG_DIR/zsh_completion.d~
+- Bash: ~$HOME/.bash_completion.d~ or ~$CONFIG_DIR/bash_completion.d~
+- Customize with ~COMPLETION_DIRNAME~ environment variable
+
+* Testing
+
+Run the test suite:
+#+begin_src shell
 bats ./compliment_tests.bats
 #+end_src
-#+begin_example
 
-#+end_example
+Run tests with verbose output:
+#+begin_src shell
+bats -v ./compliment_tests.bats
+#+end_src
+
+* Examples
+
+** Adding git completion
+#+begin_src shell
+# From a downloaded file
+compliment --file /path/to/git-completion.bash --chsh bash
+
+# From a command that generates completion
+compliment --command "curl -s https://example.com/completion" "mytool"
+#+end_src
+
+** Managing custom scripts
+#+begin_src shell
+# Add completion for your custom script
+compliment --file ./my-script-completion.zsh
+
+# List all completions
+compliment --list
+
+# Remove when no longer needed
+compliment --remove my-script-completion.zsh
+#+end_src
+
+* Troubleshooting
+
+** Completion not working
+1. Check if the completion directory exists: ~ls -l ~/.zsh_completion.d~ or ~ls -l ~/.bash_completion.d~
+2. Ensure autoload command is in your shell config
+3. Reload your shell or run ~compliment --reload~
+
+** Permission issues
+Make sure the script is executable and your shell config files are writable.
+
+** Shell detection issues
+Use ~--chsh~ to explicitly specify your shell if auto-detection fails.
