@@ -6,6 +6,10 @@ load './compliment'
 setup() {
     # Setup test environment
     TEST_DIR=$(mktemp -d)
+    export HOME="$TEST_DIR/home"
+    mkdir -p "$HOME"
+    export XDG_CONFIG_HOME="$HOME/.config"
+    mkdir -p "$XDG_CONFIG_HOME"
     export BASH_COMPLETION_DIR="$TEST_DIR/bash_completion"
     export ZSH_COMPLETION_DIR="$TEST_DIR/zsh_completion"
     mkdir -p "$BASH_COMPLETION_DIR" "$ZSH_COMPLETION_DIR"
@@ -62,7 +66,7 @@ teardown() {
     ensure_completion_loaded "zsh" "$zshrc"
     comp_dir_line_no="$(grep -nF "fpath=($ZSH_COMPLETION_DIR \$fpath)" "$zshrc" | cut -d: -f1)"
     autoload_line_no="$(grep -nF "autoload -U compinit; compinit" "$zshrc" | cut -d: -f1)"
-    [ "$comp_dir_line_no" -eq "$((autoload_line_no - 1))" ]
+    [ "$comp_dir_line_no" -eq "$((autoload_line_no - 2))" ]
     # get the line number of the insertion of comp dir
 }
 

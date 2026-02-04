@@ -85,8 +85,8 @@ Compliment automatically modifies your shell configuration files:
 - Creates completion directories if they don't exist
 
 ** Completion Directories
-- Zsh: ~$HOME/.zsh_completion.d~ or ~$CONFIG_DIR/zsh_completion.d~
-- Bash: ~$HOME/.bash_completion.d~ or ~$CONFIG_DIR/bash_completion.d~
+- Default: ~${XDG_CONFIG_HOME:-$HOME/.config}/_completions~ (fallback: ~$HOME/_completions~)
+- Override with ~ZSH_COMPLETION_DIR~ or ~BASH_COMPLETION_DIR~
 - Customize with ~COMPLETION_DIRNAME~ environment variable
 
 * Testing
@@ -127,7 +127,7 @@ compliment --remove my-script-completion.zsh
 * Troubleshooting
 
 ** Completion not working
-1. Check if the completion directory exists: ~ls -l ~/.zsh_completion.d~ or ~ls -l ~/.bash_completion.d~
+1. Check if the completion directory exists: ~ls -l ~/.config/_completions~ (or ~ls -l ~/_completions~)
 2. Ensure autoload command is in your shell config
 3. Reload your shell or run ~compliment --reload~
 

@@ -47,6 +47,23 @@ teardown() {
     [ -f "$ZSH_COMPLETION_DIR/stdin_completion" ]
 }
 
+@test "piped stdin infers zsh and completion name" {
+    run bash -c "echo '#compdef myexe' | $PROJECT_ROOT/compliment"
+    [ "$status" -eq 0 ]
+    [ -f "$ZSH_COMPLETION_DIR/_myexe" ]
+}
+
+@test "piped stdin infers bash and completion name" {
+    run bash -c "echo 'complete -F _myexe myexe' | $PROJECT_ROOT/compliment"
+    [ "$status" -eq 0 ]
+    [ -f "$BASH_COMPLETION_DIR/myexe" ]
+}
+
+@test "piped stdin with unknown content fails without tty" {
+    run bash -c "echo 'nothing to infer here' | $PROJECT_ROOT/compliment"
+    [ "$status" -eq 1 ]
+}
+
 @test "completion directory creation respects custom COMPLETION_DIRNAME" {
     # Clear any existing completion dir variables
     unset ZSH_COMPLETION_DIR
