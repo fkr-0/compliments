@@ -14,6 +14,9 @@ setup() {
     # Create temporary completion directories for testing
     export BASH_COMPLETION_DIR="$(mktemp -d)"
     export ZSH_COMPLETION_DIR="$(mktemp -d)"
+    export HOME="$(mktemp -d)"
+    export XDG_CONFIG_HOME="$HOME/.config"
+    mkdir -p "$XDG_CONFIG_HOME"
     # export compliment="$DIR/../compliment"
 }
 # compliment()
@@ -21,8 +24,9 @@ setup() {
 
 teardown() {
     # Clean up after tests
+    rm -rf "$BASH_COMPLETION_DIR"
     rm -rf "$ZSH_COMPLETION_DIR"
-    rm -rf "$ZSH_COMPLETION_DIR"
+    rm -rf "$HOME"
 }
 
 @test "Add completion from file" {
