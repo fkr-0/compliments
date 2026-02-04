@@ -1,0 +1,167 @@
+<!-- MEDIA:LOGO:BEGIN -->
+![logo](https://raw.githubusercontent.com/fkr-0/compliments/media/media/compliment.png)
+<!-- MEDIA:LOGO:END -->
+
+A script that facilitates listing/addition/removal of completion scripts
+for bash and zsh shells.
+
+# Installation
+
+Clone the repository and make the script executable:
+
+``` shell
+git clone <repository-url>
+cd compliments
+chmod +x compliment
+```
+
+Optionally, copy it to a directory in your PATH:
+
+``` shell
+sudo cp compliment /usr/local/bin/
+```
+
+# Usage
+
+Compliment automatically detects your shell from your login shell but
+can be overridden with `--chsh`.
+
+## Adding Completions
+
+### From a file
+
+``` shell
+compliment --file /path/to/completion_file
+# For a specific shell
+compliment --file /path/to/completion_file --chsh zsh
+```
+
+### From a command output
+
+``` shell
+compliment --command "python myscript --make-comp" "myscript-comps"
+```
+
+### From stdin
+
+``` shell
+python myscript --make-comp | compliment --stdin "myscript-comps"
+```
+
+## Managing Completions
+
+### List completions
+
+``` shell
+compliment --list
+# For a specific shell
+compliment --list --chsh bash
+```
+
+### Remove a completion
+
+``` shell
+compliment --remove completion_name
+```
+
+### Reload completions
+
+``` shell
+compliment --reload
+```
+
+## Shell Selection
+
+Override the auto-detected shell:
+
+``` shell
+compliment --chsh zsh --file completion.zsh
+compliment --chsh bash --file completion.bash
+```
+
+# Best Practices
+
+## Security
+
+-   Be cautious when using `--command` as it executes arbitrary shell
+    commands
+-   Review completion scripts before adding them
+-   Prefer `--file` or `--stdin` over `--command` when possible
+
+## Organization
+
+-   Use descriptive names for completion scripts
+-   Group related completions with consistent naming
+-   Test completions before adding them permanently
+
+## Configuration Files
+
+Compliment automatically modifies your shell configuration files:
+
+-   Zsh: `.zshrc` (respects `ZDOTDIR`)
+-   Bash: `.bashrc` or `.bash_profile`
+-   Creates completion directories if they don\'t exist
+
+## Completion Directories
+
+-   Default: `${XDG_CONFIG_HOME:-$HOME/.config}/_completions` (fallback:
+    `$HOME/_completions`)
+-   Override with `ZSH_COMPLETION_DIR` or `BASH_COMPLETION_DIR`
+-   Customize with `COMPLETION_DIRNAME` environment variable
+
+# Testing
+
+Run the test suite:
+
+``` shell
+bats ./compliment_tests.bats
+```
+
+Run tests with verbose output:
+
+``` shell
+bats -v ./compliment_tests.bats
+```
+
+# Examples
+
+## Adding git completion
+
+``` shell
+# From a downloaded file
+compliment --file /path/to/git-completion.bash --chsh bash
+
+# From a command that generates completion
+compliment --command "curl -s https://example.com/completion" "mytool"
+```
+
+## Managing custom scripts
+
+``` shell
+# Add completion for your custom script
+compliment --file ./my-script-completion.zsh
+
+# List all completions
+compliment --list
+
+# Remove when no longer needed
+compliment --remove my-script-completion.zsh
+```
+
+# Troubleshooting
+
+## Completion not working
+
+1.  Check if the completion directory exists:
+    `ls -l ~/.config/_completions` (or `ls -l ~/_completions`)
+2.  Ensure autoload command is in your shell config
+3.  Reload your shell or run `compliment --reload`
+
+## Permission issues
+
+Make sure the script is executable and your shell config files are
+writable.
+
+## Shell detection issues
+
+Use `--chsh` to explicitly specify your shell if auto-detection fails.
