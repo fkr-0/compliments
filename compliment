@@ -15,6 +15,12 @@ declare _SHELL_TYPE
 declare _SHELL_CONF_DIR
 declare _SHELL_COMPLETION_DIR
 declare _SHELL_RC_FILE
+declare _BASH_CONF_DIR_CACHE=""
+declare _ZSH_CONF_DIR_CACHE=""
+declare _BASH_RC_FILE_CACHE=""
+declare _ZSH_RC_FILE_CACHE=""
+declare _BASH_COMPLETION_DIR_CACHE=""
+declare _ZSH_COMPLETION_DIR_CACHE=""
 declare _LAST_COMPLETION_FILE=""
 
 get_shell_type() {
@@ -80,52 +86,62 @@ bash_conf_dir() {
 
 get_config_dir() {
   local shell_type="$1"
-  if [ -n "${_SHELL_CONF_DIR:-}" ]; then
-    echo "$_SHELL_CONF_DIR"
-    return 0
-  fi
+
   if [ "$shell_type" == "zsh" ]; then
-    _SHELL_CONF_DIR="$(zsh_conf_dir)"
-    if [ $? -ne 0 ] || [ -z "$_SHELL_CONF_DIR" ]; then
+    if [ -n "${_ZSH_CONF_DIR_CACHE:-}" ]; then
+      echo "$_ZSH_CONF_DIR_CACHE"
+      return 0
+    fi
+    _ZSH_CONF_DIR_CACHE="$(zsh_conf_dir)"
+    if [ $? -ne 0 ] || [ -z "$_ZSH_CONF_DIR_CACHE" ]; then
       # Return error if zsh config directory cannot be found
       return 1
     fi
+    echo "$_ZSH_CONF_DIR_CACHE"
   else
-    _SHELL_CONF_DIR="$(bash_conf_dir)"
-    if [ $? -ne 0 ] || [ -z "$_SHELL_CONF_DIR" ]; then
+    if [ -n "${_BASH_CONF_DIR_CACHE:-}" ]; then
+      echo "$_BASH_CONF_DIR_CACHE"
+      return 0
+    fi
+    _BASH_CONF_DIR_CACHE="$(bash_conf_dir)"
+    if [ $? -ne 0 ] || [ -z "$_BASH_CONF_DIR_CACHE" ]; then
       # Return error if bash config directory cannot be found
       return 1
     fi
+    echo "$_BASH_CONF_DIR_CACHE"
   fi
-  echo "$_SHELL_CONF_DIR"
 }
 
 get_rc_file() {
   local shell_type="$1"
   local ZDOTDIR
   ZDOTDIR="$(zsh -c 'echo $ZDOTDIR' 2>/dev/null || echo)"
-  if [ -n "${_SHELL_RC_FILE:-}" ]; then
-    echo "$_SHELL_RC_FILE"
-    return 0
-  fi
 
   if [ "$shell_type" == "zsh" ]; then
+    if [ -n "${_ZSH_RC_FILE_CACHE:-}" ]; then
+      echo "$_ZSH_RC_FILE_CACHE"
+      return 0
+    fi
     if [ -d "$ZDOTDIR" ] && [ -f "$ZDOTDIR/.zshrc" ]; then
-      _SHELL_RC_FILE="$(readlink -f "$ZDOTDIR/.zshrc")"
-      echo "$_SHELL_RC_FILE"
+      _ZSH_RC_FILE_CACHE="$(readlink -f "$ZDOTDIR/.zshrc")"
+      echo "$_ZSH_RC_FILE_CACHE"
       return 0
     fi
     if [ -f ~/.zshrc ]; then
-      _SHELL_RC_FILE="$(readlink -f ~/.zshrc)"
-      echo "$_SHELL_RC_FILE"
+      _ZSH_RC_FILE_CACHE="$(readlink -f ~/.zshrc)"
+      echo "$_ZSH_RC_FILE_CACHE"
       return 0
     fi
     log "ERROR" "Zsh config file not found"
     return 1
   else
+    if [ -n "${_BASH_RC_FILE_CACHE:-}" ]; then
+      echo "$_BASH_RC_FILE_CACHE"
+      return 0
+    fi
     if [ -f ~/.bashrc ]; then
-      _SHELL_RC_FILE="$(readlink -f ~/.bashrc)"
-      echo "$_SHELL_RC_FILE"
+      _BASH_RC_FILE_CACHE="$(readlink -f ~/.bashrc)"
+      echo "$_BASH_RC_FILE_CACHE"
       return 0
     fi
     log "ERROR" "Bash config file not found"
@@ -133,40 +149,125 @@ get_rc_file() {
   fi
 }
 
+resolve_home_path() {
+  local path="$1"
+
+  case "$path" in
+  "~") path="$HOME" ;;
+  "~/"*) path="$HOME/${path#~/}" ;;
+  "\$HOME/"*) path="$HOME/${path#\$HOME/}" ;;
+  "\${HOME}/"*) path="$HOME/${path#\$\{HOME\}/}" ;;
+  esac
+
+  echo "$path"
+}
+
+get_completion_dir_from_rc() {
+  local shell_type="$1"
+  local rc_file="$2"
+  local line=""
+  local raw_path=""
+
+  [ -f "$rc_file" ] || return 1
+
+  if [ "$shell_type" = "zsh" ]; then
+    line="$(grep -E '^[[:space:]]*fpath=\([^)]*\$fpath[^)]*\)' "$rc_file" | grep -v '^[[:space:]]*#' | head -n1 || true)"
+    [ -n "$line" ] || return 1
+    raw_path="$(echo "$line" | sed -E 's/^[[:space:]]*fpath=\(([\"\047]?)([^\"\047[:space:])]+).*/\2/')"
+  else
+    line="$(grep -E '^[[:space:]]*for[[:space:]]+file[[:space:]]+in[[:space:]]+.+/\*;[[:space:]]*do[[:space:]]+\.[[:space:]]+"?\$file"?;[[:space:]]*done' "$rc_file" | grep -v '^[[:space:]]*#' | head -n1 || true)"
+    [ -n "$line" ] || return 1
+    raw_path="$(echo "$line" | sed -E 's#^[[:space:]]*for[[:space:]]+file[[:space:]]+in[[:space:]]+(.+)/\*;[[:space:]]*do[[:space:]]+\.[[:space:]]+"?\$file"?;[[:space:]]*done#\1#')"
+  fi
+
+  raw_path="${raw_path%\"}"
+  raw_path="${raw_path#\"}"
+  raw_path="${raw_path%\'}"
+  raw_path="${raw_path#\'}"
+  raw_path="$(resolve_home_path "$raw_path")"
+
+  [ -n "$raw_path" ] || return 1
+  echo "$raw_path"
+}
+
 # Function to get the completion directory based on shell type
 get_completion_dir() {
   local shell_type="$1"
+  local cached_dir=""
+  local rc_file=""
+  local rc_completion_dir=""
+  local default_dirname=""
+  local base_dir=""
 
   # Always check for explicit environment variables first
   if [ "$shell_type" == "zsh" ] && [ -n "${ZSH_COMPLETION_DIR:-}" ]; then
-    _SHELL_COMPLETION_DIR="$ZSH_COMPLETION_DIR"
-    echo "$_SHELL_COMPLETION_DIR"
+    _ZSH_COMPLETION_DIR_CACHE="$ZSH_COMPLETION_DIR"
+    echo "$_ZSH_COMPLETION_DIR_CACHE"
     return 0
   fi
 
   if [ "$shell_type" == "bash" ] && [ -n "${BASH_COMPLETION_DIR:-}" ]; then
-    _SHELL_COMPLETION_DIR="$BASH_COMPLETION_DIR"
-    echo "$_SHELL_COMPLETION_DIR"
+    _BASH_COMPLETION_DIR_CACHE="$BASH_COMPLETION_DIR"
+    echo "$_BASH_COMPLETION_DIR_CACHE"
     return 0
   fi
 
-  # Check if the completion dir is already cached and COMPLETION_DIRNAME is not set
-  if [ -n "${_SHELL_COMPLETION_DIR:-}" ] && [ -z "${COMPLETION_DIRNAME:-}" ]; then
-    echo "$_SHELL_COMPLETION_DIR"
+  # Infer from existing shell rc file configuration
+  if rc_file="$(get_rc_file "$shell_type" 2>/dev/null)"; then
+    rc_completion_dir="$(get_completion_dir_from_rc "$shell_type" "$rc_file" || true)"
+    if [ -n "$rc_completion_dir" ]; then
+      if [ "$shell_type" = "zsh" ]; then
+        _ZSH_COMPLETION_DIR_CACHE="$rc_completion_dir"
+      else
+        _BASH_COMPLETION_DIR_CACHE="$rc_completion_dir"
+      fi
+      echo "$rc_completion_dir"
+      return 0
+    fi
+  fi
+
+  if [ "$shell_type" = "zsh" ]; then
+    cached_dir="${_ZSH_COMPLETION_DIR_CACHE:-}"
+  else
+    cached_dir="${_BASH_COMPLETION_DIR_CACHE:-}"
+  fi
+
+  # Use per-shell cache when no custom dirname override is set
+  if [ -n "$cached_dir" ] && [ -z "${COMPLETION_DIRNAME:-}" ]; then
+    echo "$cached_dir"
     return 0
   fi
 
-  # Use custom completion directory name if set
-  local COMPLETION_DIRNAME="${COMPLETION_DIRNAME:-_completions}"
-  local base_dir="${XDG_CONFIG_HOME:-}"
-  if [ -z "$base_dir" ] && [ -d "$HOME/.config" ]; then
+  if [ "$shell_type" = "zsh" ]; then
+    default_dirname="zsh_completion.d"
+  else
+    default_dirname="bash_completion.d"
+  fi
+
+  # If user sets COMPLETION_DIRNAME, keep it as explicit override.
+  if [ -n "${COMPLETION_DIRNAME:-}" ]; then
+    default_dirname="$COMPLETION_DIRNAME"
+  fi
+
+  if base_dir="$(get_config_dir "$shell_type" 2>/dev/null)"; then
+    :
+  elif [ "$shell_type" = "zsh" ]; then
+    base_dir="${XDG_CONFIG_HOME:-$HOME/.config}/zsh"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+    base_dir="$XDG_CONFIG_HOME"
+  elif [ -d "$HOME/.config" ]; then
     base_dir="$HOME/.config"
-  fi
-  if [ -z "$base_dir" ]; then
+  else
     base_dir="$HOME"
   fi
-  _SHELL_COMPLETION_DIR="$base_dir${base_dir:+/}${COMPLETION_DIRNAME}"
-  echo "$_SHELL_COMPLETION_DIR"
+
+  cached_dir="$base_dir${base_dir:+/}${default_dirname}"
+  if [ "$shell_type" = "zsh" ]; then
+    _ZSH_COMPLETION_DIR_CACHE="$cached_dir"
+  else
+    _BASH_COMPLETION_DIR_CACHE="$cached_dir"
+  fi
+  echo "$cached_dir"
 }
 
 prompt_yes_no() {
@@ -568,7 +669,8 @@ usage() {
   echo -e "  ${_YELLOW}completion${_RESET} <shell>        Output completion script for"
   echo -e "                           bash or zsh to stdout"
   echo -e "  ${_YELLOW}--lint${_RESET}                 Validate stored completion files"
-  echo -e "  Default completion dir: ~/.config/_completions (or ~/_completions)"
+  echo -e "  Default completion dir (bash): ~/.config/bash_completion.d"
+  echo -e "  Default completion dir (zsh): ~/.config/zsh/zsh_completion.d"
   echo ""
 }
 
@@ -788,7 +890,7 @@ show_status() {
 
   echo ""
   echo -e "${_BOLD}Environment Variables:${_RESET}"
-  echo "COMPLETION_DIRNAME: ${COMPLETION_DIRNAME:-_completions}"
+  echo "COMPLETION_DIRNAME: ${COMPLETION_DIRNAME:-<not set>}"
   echo "BASH_COMPLETION_DIR: ${BASH_COMPLETION_DIR:-<not set>}"
   echo "ZSH_COMPLETION_DIR: ${ZSH_COMPLETION_DIR:-<not set>}"
 
@@ -891,63 +993,6 @@ add_completion_from_command() {
   fi
 }
 
-show_status() {
-  echo -e "${_BOLD}${_BLUE}=== Compliment Status Report ===${_RESET}"
-  echo ""
-
-  # Show active shell information
-  local active_shell
-  active_shell="$(get_shell_type)"
-  echo -e "${_BOLD}Active Shell:${_RESET} ${_GREEN}$active_shell${_RESET}"
-
-  # Show config for both shells
-  local shells=("bash" "zsh")
-  for shell in "${shells[@]}"; do
-    echo ""
-    echo -e "${_BOLD}=== $shell Configuration ===${_RESET}"
-
-    local config_dir
-    config_dir="$(get_config_dir "$shell" 2>/dev/null || echo "Not found")"
-    echo "Config Directory: $config_dir"
-
-    local rc_file
-    rc_file="$(get_rc_file "$shell" 2>/dev/null || echo "Not found")"
-    echo "RC File: $rc_file"
-
-    local completion_dir
-    completion_dir="$(get_completion_dir "$shell" 2>/dev/null || echo "Not determined")"
-    echo "Completion Directory: $completion_dir"
-
-    # Count completions
-    if [ -d "$completion_dir" ]; then
-      local completion_count
-      completion_count=$(find "$completion_dir" -maxdepth 1 -type f | wc -l)
-      echo -e "Completions: ${_GREEN}$completion_count${_RESET}"
-
-      # List some examples if directory isn't empty
-      if [ "$completion_count" -gt 0 ]; then
-        echo "Examples:"
-        find "$completion_dir" -maxdepth 1 -type f -not -name ".*" | head -5 | while read -r file; do
-          echo "  - $(basename "$file")"
-        done
-        if [ "$completion_count" -gt 5 ]; then
-          echo "  ... and $((completion_count - 5)) more"
-        fi
-      fi
-    else
-      echo -e "Completions: ${_YELLOW}Directory does not exist${_RESET}"
-    fi
-  done
-
-  echo ""
-  echo -e "${_BOLD}Environment Variables:${_RESET}"
-  echo "COMPLETION_DIRNAME: ${COMPLETION_DIRNAME:-_completions}"
-  echo "BASH_COMPLETION_DIR: ${BASH_COMPLETION_DIR:-<not set>}"
-  echo "ZSH_COMPLETION_DIR: ${ZSH_COMPLETION_DIR:-<not set>}"
-
-  echo ""
-  echo -e "${_BOLD}Note:${_RESET} Use --chsh to override shell detection"
-}
 add_completion_from_stdin() {
   local name="$1"
   local type="${2:-${COMPL_SHELL:-$(get_shell_type)}}"

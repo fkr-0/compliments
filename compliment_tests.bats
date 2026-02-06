@@ -101,3 +101,55 @@ teardown() {
     [ "$status" -eq 0 ]
     [ "$output" = "--help" ]
 }
+
+@test "show_status uses shell rc configured completion directories when present" {
+    unset BASH_COMPLETION_DIR
+    unset ZSH_COMPLETION_DIR
+
+    local bash_dir="$HOME/.dotfiles/config/bash_completion.d"
+    local zsh_dir="$HOME/.config/zsh/_completion.d"
+    mkdir -p "$bash_dir" "$zsh_dir"
+    touch "$bash_dir/mybashcomp" "$zsh_dir/_myzshcomp"
+
+    cat > "$HOME/.bashrc" <<EOF
+for file in $bash_dir/*; do . "\$file"; done
+EOF
+
+    cat > "$HOME/.zshrc" <<EOF
+fpath=($zsh_dir \$fpath)
+EOF
+
+    run show_status
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"=== bash Configuration ==="* ]]
+    [[ "$output" == *"Completion Directory: $bash_dir"* ]]
+    [[ "$output" == *"=== zsh Configuration ==="* ]]
+    [[ "$output" == *"Completion Directory: $zsh_dir"* ]]
+}
+
+@test "get_completion_dir defaults to bash_completion.d for bash" {
+    unset BASH_COMPLETION_DIR
+    unset COMPLETION_DIRNAME
+    mkdir -p "$HOME/.dotfiles/config"
+    touch "$HOME/.dotfiles/config/bashrc"
+    ln -sf "$HOME/.dotfiles/config/bashrc" "$HOME/.bashrc"
+
+    run get_completion_dir "bash"
+
+    [ "$status" -eq 0 ]
+    [ "$output" = "$HOME/.dotfiles/config/bash_completion.d" ]
+}
+
+@test "get_completion_dir defaults to zsh_completion.d for zsh" {
+    unset ZSH_COMPLETION_DIR
+    unset COMPLETION_DIRNAME
+    mkdir -p "$HOME/.config/zsh"
+    touch "$HOME/.zshrc"
+    ln -sf "$HOME/.config/zsh/.zshrc" "$HOME/.zshrc"
+
+    run get_completion_dir "zsh"
+
+    [ "$status" -eq 0 ]
+    [ "$output" = "$HOME/.config/zsh/zsh_completion.d" ]
+}
